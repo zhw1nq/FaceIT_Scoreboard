@@ -9,63 +9,63 @@
 [![Forks](https://img.shields.io/github/forks/zhw1nq/FaceIT_Scoreboard?style=social)](https://github.com/zhw1nq/FaceIT_Scoreboard/network/members)
 [![Watchers](https://img.shields.io/github/watchers/zhw1nq/FaceIT_Scoreboard?style=social)](https://github.com/zhw1nq/FaceIT_Scoreboard/watchers)
 
-📖 **[README.md](README.md)** | **[README-ENGLISH.md](README-ENGLISH.md)**
+📖 **[README.md](README.md)** | **[README-VIETNAM.md](README-VIETNAM.md)**
 
-> **Hiển thị cấp độ FaceIT trên bảng điểm – biết ai đang "carry" chỉ trong một cái nhìn.**
+> **Display FaceIT levels on the scoreboard – know who's carrying at a glance.**
 
-Plugin CounterStrikeSharp này nâng cao máy chủ CS2 của bạn bằng cách hiển thị cấp độ kỹ năng FaceIT trực tiếp trên bảng điểm sử dụng các đồng xu/huy chương tùy chỉnh. Người chơi có thể bật/tắt hiển thị cấp độ FaceIT và plugin lưu trữ dữ liệu hiệu quả để giảm thiểu các lệnh gọi API.
+This CounterStrikeSharp plugin enhances your CS2 server by displaying FaceIT skill levels directly on the scoreboard using custom coins/medals. Players can toggle FaceIT level display on/off and the plugin efficiently stores data to minimize API calls.
 
-## ✨ Tính năng
+## ✨ Features
 
-- 🏆 **Hiển thị Cấp độ FaceIT**: Hiển thị cấp độ kỹ năng FaceIT (1-10) dưới dạng đồng xu tùy chỉnh trên bảng điểm
-- ⚡ **Cập nhật Thời gian thực**: Tự động lấy và cập nhật cấp độ FaceIT của người chơi
-- 🔄 **Điều khiển Người chơi**: Bật/tắt hiển thị cấp độ FaceIT bằng các lệnh đơn giản
-- 💾 **Bộ nhớ đệm Thông minh**: Hệ thống bộ nhớ đệm hiệu quả để giảm các lệnh gọi API và cải thiện hiệu suất
-- 🎮 **Hỗ trợ Đa trò chơi**: Hỗ trợ cả dữ liệu FaceIT CS2 và CSGO
-- ⚙️ **Có thể Cấu hình**: Nhiều tùy chọn cấu hình để tùy chỉnh
-- 💿 **Dữ liệu Bền vững**: Tùy chọn người chơi được lưu qua các lần khởi động lại máy chủ
+- 🏆 **FaceIT Level Display**: Show FaceIT skill levels (1-10) as custom coins on the scoreboard
+- ⚡ **Real-time Updates**: Automatically fetch and update player FaceIT levels
+- 🔄 **Player Control**: Toggle FaceIT level display on/off with simple commands
+- 💾 **Smart Caching**: Efficient caching system to reduce API calls and improve performance
+- 🎮 **Multi-game Support**: Supports both FaceIT CS2 and CSGO data
+- ⚙️ **Configurable**: Multiple configuration options for customization
+- 💿 **Persistent Data**: Player preferences saved across server restarts
 
-## 🎨 Đồng xu Cấp độ FaceIT
+## 🎨 FaceIT Level Coins
 
-Plugin sử dụng ID đồng xu tùy chỉnh để đại diện cho các cấp độ kỹ năng FaceIT khác nhau:
+The plugin uses custom coin IDs to represent different FaceIT skill levels:
 
-| Cấp độ | ID Đồng xu | Mô tả |
-|--------|------------|-------|
-| 1      | 1088       | Cấp độ 1  |
-| 2      | 1087       | Cấp độ 2  |
-| 3      | 1032       | Cấp độ 3  |
-| 4      | 1055       | Cấp độ 4  |
-| 5      | 1041       | Cấp độ 5  |
-| 6      | 1074       | Cấp độ 6  |
-| 7      | 1039       | Cấp độ 7  |
-| 8      | 1067       | Cấp độ 8  |
-| 9      | 1061       | Cấp độ 9  |
-| 10     | 1017       | Cấp độ 10 |
+| Level | Coin ID | Description |
+|-------|---------|-------------|
+| 1     | 1088    | Level 1     |
+| 2     | 1087    | Level 2     |
+| 3     | 1032    | Level 3     |
+| 4     | 1055    | Level 4     |
+| 5     | 1041    | Level 5     |
+| 6     | 1074    | Level 6     |
+| 7     | 1039    | Level 7     |
+| 8     | 1067    | Level 8     |
+| 9     | 1061    | Level 9     |
+| 10    | 1017    | Level 10    |
 
-## 📋 Yêu cầu
+## 📋 Requirements
 
-- [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) (Phiên bản API tối thiểu: 147)
-- Máy chủ CS2 Dedicated
+- [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) (Minimum API Version: 147)
+- CS2 Dedicated Server
 - FaceIT API Key
 
-## 🔧 Cài đặt
+## 🔧 Installation
 
-1. **Tải xuống** và cài đặt bản phát hành mới nhất
-2. **Tùy chỉnh** tệp cấu hình (`addons/counterstrikesharp/configs/plugins/FaceIT_Scoreboard/FaceIT_Scoreboard.json`)
-3. **Tải xuống** kho workshop nằm trong thư mục gốc của releases hiện tại và cài đặt KHÔNG CẦN BIÊN DỊCH
+1. **Download** and install the latest release
+2. **Configure** the config file (`addons/counterstrikesharp/configs/plugins/FaceIT_Scoreboard/FaceIT_Scoreboard.json`)
+3. **Download** the workshop collection located in the root folder of the current releases and install WITHOUT COMPILATION
    
-   **Lưu ý**: Đặt các tệp không phải trong `content/csgo_addons/****`, mà trong đường dẫn `game/csgo_addons/****`
+   **Note**: Place the files not in `content/csgo_addons/****`, but in the path `game/csgo_addons/****`
 
-4. **Khởi động lại** máy chủ hoặc sử dụng `css_plugins reload`
+4. **Restart** the server or use `css_plugins reload`
 
-## ⚙️ Cấu hình
+## ⚙️ Configuration
 
-Plugin tạo tệp cấu hình tại:
+The plugin creates a configuration file at:
 ```
 /game/csgo/addons/counterstrikesharp/configs/plugins/FaceIT_Scoreboard/FaceIT_Scoreboard.json
 ```
 
-### Cấu hình Mặc định
+### Default Configuration
 
 ```json
 {
@@ -80,82 +80,82 @@ Plugin tạo tệp cấu hình tại:
 }
 ```
 
-### Các Tùy chọn Cấu hình
+### Configuration Options
 
-| Tùy chọn | Loại | Mô tả | Mặc định |
-|----------|------|-------|----------|
-| `FaceitApiKey` | string | FaceIT API key của bạn (**Bắt buộc**) | `""` |
-| `UseCSGO` | boolean | Dự phòng dữ liệu CSGO nếu không tìm thấy CS2 | `false` |
-| `DefaultStatus` | boolean | Hiển thị cấp độ FaceIT mặc định cho người chơi mới | `true` |
-| `Commands` | array | Lệnh để bật/tắt hiển thị FaceIT | `["!faceit", "!fl"]` |
-| `CacheExpiryHours` | integer | Số giờ trước khi tải lại dữ liệu người chơi | `24` |
-| `MaxConcurrentRequests` | integer | Số lượng yêu cầu API đồng thời tối đa | `10` |
-| `RequestTimeoutSeconds` | integer | Thời gian chờ yêu cầu API | `10` |
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `FaceitApiKey` | string | Your FaceIT API key (**Required**) | `""` |
+| `UseCSGO` | boolean | Fallback to CSGO data if CS2 not found | `false` |
+| `DefaultStatus` | boolean | Default FaceIT level display for new players | `true` |
+| `Commands` | array | Commands to toggle FaceIT display | `["!faceit", "!fl"]` |
+| `CacheExpiryHours` | integer | Hours before reloading player data | `24` |
+| `MaxConcurrentRequests` | integer | Maximum concurrent API requests | `10` |
+| `RequestTimeoutSeconds` | integer | API request timeout | `10` |
 
-### 🔑 Lấy FaceIT API Key
+### 🔑 Getting FaceIT API Key
 
-1. Truy cập [FaceIT Developer Portal](https://developers.faceit.com/)
-2. Đăng nhập bằng tài khoản FaceIT của bạn
-3. Tạo ứng dụng mới
-4. Sao chép API key vào tệp cấu hình
+1. Visit [FaceIT Developer Portal](https://developers.faceit.com/)
+2. Log in with your FaceIT account
+3. Create a new application
+4. Copy the API key to your config file
 
-## 🎮 Lệnh
+## 🎮 Commands
 
-### Lệnh Người chơi
+### Player Commands
 
-| Lệnh | Bí danh | Mô tả |
-|------|---------|-------|
-| `!faceit` | `!fl` | Bật/tắt hiển thị cấp độ FaceIT |
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `!faceit` | `!fl` | Toggle FaceIT level display |
 
-### Lệnh Console
+### Console Commands
 
-| Lệnh | Mô tả |
-|------|-------|
-| `css_faceit` | Bật/tắt hiển thị cấp độ FaceIT (console) |
-| `css_fl` | Bật/tắt hiển thị cấp độ FaceIT (console) |
+| Command | Description |
+|---------|-------------|
+| `css_faceit` | Toggle FaceIT level display (console) |
+| `css_fl` | Toggle FaceIT level display (console) |
 
-## 📁 Cấu trúc Tệp
+## 📁 File Structure
 
 ```
 addons/counterstrikesharp/plugins/FaceIT_Scoreboard/
-├── FaceIT_Scoreboard.dll          # Tệp plugin chính
-├── FaceIT_Scoreboard.pdb          # Ký hiệu debug
+├── FaceIT_Scoreboard.dll          # Main plugin file
+├── FaceIT_Scoreboard.pdb          # Debug symbols
 └── data/
-    └── faceit_data.json           # Bộ nhớ đệm dữ liệu người chơi
+    └── faceit_data.json           # Player data cache
 ```
 
-## 🐛 Khắc phục Sự cố
+## 🐛 Troubleshooting
 
-### Các Vấn đề Thường gặp
+### Common Issues
 
-1. **Không hiển thị cấp độ FaceIT**
-   - Kiểm tra xem FaceIT API key đã được cấu hình đúng chưa
-   - Xác minh người chơi có tài khoản FaceIT được liên kết với Steam ID
-   - Kiểm tra console máy chủ để xem lỗi API
+1. **FaceIT levels not showing**
+   - Check if FaceIT API key is configured correctly
+   - Verify player has FaceIT account linked to Steam ID
+   - Check server console for API errors
 
-2. **Plugin không tải**
-   - Đảm bảo phiên bản CounterStrikeSharp tối thiểu (147) đã được đáp ứng
-   - Xác minh quyền truy cập tệp
-   - Kiểm tra các plugin xung đột
+2. **Plugin not loading**
+   - Ensure minimum CounterStrikeSharp version (147) is met
+   - Verify file permissions
+   - Check for conflicting plugins
 
-3. **Vấn đề hiệu suất**
-   - Giảm giá trị `MaxConcurrentRequests`
-   - Tăng `CacheExpiryHours` để giảm các lệnh gọi API
-   - Theo dõi tài nguyên máy chủ
+3. **Performance issues**
+   - Reduce `MaxConcurrentRequests` value
+   - Increase `CacheExpiryHours` to reduce API calls
+   - Monitor server resources
 
-## 🙏 Tín dụng
+## 🙏 Credits
 
-- **Ý tưởng Gốc**: Dựa trên ý tưởng từ [Pisex's cs2-faceit-level](https://github.com/Pisex/cs2-faceit-level)
-- **Framework**: [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) bởi roflmuffin
+- **Original Idea**: Based on the idea from [Pisex's cs2-faceit-level](https://github.com/Pisex/cs2-faceit-level)
+- **Framework**: [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) by roflmuffin
 - **API**: [FaceIT Data API](https://developers.faceit.com/)
 
-## 💬 Hỗ trợ & Cộng đồng
+## 💬 Support & Community
 
-- **Hỗ trợ Discord**: [@vhming_](https://discord.com/users/vhming_)
-- **Cộng đồng CounterStrikeSharp**: [Tham gia Discord](https://discord.gg/eA9QTuNYkp)
+- **Discord Support**: [@vhming_](https://discord.com/users/vhming_)
+- **CounterStrikeSharp Community**: [Join Discord](https://discord.gg/eA9QTuNYkp)
 
 ---
 
 <div align="center">
-<i>Được tạo với ❤️ cho cộng đồng CS2</i>
+<i>Made with ❤️ for the CS2 community</i>
 </div>

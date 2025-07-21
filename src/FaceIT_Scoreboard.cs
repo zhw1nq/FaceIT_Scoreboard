@@ -68,16 +68,16 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 {
     public override string ModuleName => "FaceIT_Scoreboard";
     public override string ModuleAuthor => "zhw1nq";
-    public override string ModuleDescription => "Displays FaceIT levels on the scoreboard – know who’s carrying in a blink.";
+    public override string ModuleDescription => "Displays FaceIT levels on the scoreboard – know who's carrying in a blink.";
     public override string ModuleVersion => "1.0.0";
 
     public FaceitConfig Config { get; set; } = new();
 
     private static readonly HttpClient _httpClient = new();
     private readonly ConcurrentDictionary<ulong, PlayerData> _playerData = new();
-    private readonly SemaphoreSlim _apiSemaphore;
+    private SemaphoreSlim? _apiSemaphore;
     private readonly SemaphoreSlim _fileSemaphore = new(1, 1);
-    
+
     private static readonly Dictionary<int, int> FaceitLevelCoins = new()
     {
         { 1, 1088 }, { 2, 1087 }, { 3, 1032 }, { 4, 1055 }, { 5, 1041 },
@@ -97,7 +97,8 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 
     public FaceIT_Scoreboard()
     {
-        _apiSemaphore = new SemaphoreSlim(10, 10); // Mặc định, sẽ được cập nhật trong OnConfigParsed
+        // Initialize with default value, will be recreated in OnConfigParsed
+        _apiSemaphore = new SemaphoreSlim(10, 10);
     }
 
     public void OnConfigParsed(FaceitConfig config)
@@ -109,18 +110,15 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             Logger.LogWarning("Faceit API key is not configured!");
         }
 
-        // Cấu hình HTTP client
+        // Configure HTTP client
         _httpClient.DefaultRequestHeaders.Clear();
         _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {Config.FaceitApiKey}");
         _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
         _httpClient.Timeout = TimeSpan.FromSeconds(Config.RequestTimeoutSeconds);
 
-        // Cập nhật giới hạn request đồng thời
-        _apiSemaphore.Release(_apiSemaphore.CurrentCount);
-        for (int i = 0; i < Config.MaxConcurrentRequests; i++)
-        {
-            _apiSemaphore.Release();
-        }
+        // Recreate semaphore with the correct capacity
+        _apiSemaphore?.Dispose();
+        _apiSemaphore = new SemaphoreSlim(Config.MaxConcurrentRequests, Config.MaxConcurrentRequests);
 
         _dataPath = Path.Combine(ModuleDirectory, "data", "faceit_data.json");
     }
@@ -130,17 +128,17 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
 
-        // Đăng ký lệnh (command) một cách hiệu quả
+        // Register commands efficiently
         foreach (var command in Config.Commands)
         {
             AddCommand(command, "Toggle Faceit level display", OnFaceitCommand);
         }
 
-        // Thiết lập bộ đếm thời gian tối ưu
+        // Setup optimal timers
         _updateTimer = AddTimer(2.0f, UpdatePlayerCoins, TimerFlags.REPEAT);
         _saveTimer = AddTimer(30.0f, ProcessSaveQueue, TimerFlags.REPEAT);
 
-        // Tải dữ liệu người chơi từ file (nếu có)
+        // Load player data from file (if exists)
         _ = LoadPlayerDataAsync();
 
         Logger.LogInformation($"{ModuleName} v{ModuleVersion} loaded successfully!");
@@ -150,11 +148,11 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     {
         _updateTimer?.Kill();
         _saveTimer?.Kill();
-        
-        // Lưu toàn bộ dữ liệu đang chờ
+
+        // Save all pending data
         ProcessSaveQueue();
-        
-        _apiSemaphore.Dispose();
+
+        _apiSemaphore?.Dispose();
         _fileSemaphore.Dispose();
     }
 
@@ -167,7 +165,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 
         var steamId = player.SteamID;
 
-        // Khởi tạo hoặc lấy dữ liệu người chơi
+        // Initialize or get player data
         var playerData = _playerData.GetOrAdd(steamId, _ => new PlayerData
         {
             ShowFaceitLevel = Config.DefaultStatus,
@@ -176,7 +174,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             IsProcessing = false
         });
 
-        // Lấy dữ liệu cấp độ Faceit nếu cần thiết (không chờ kết quả)
+        // Fetch Faceit level data if needed (don't wait for result)
         if (ShouldFetchLevel(playerData))
         {
             _ = FetchPlayerFaceitLevelAsync(steamId);
@@ -192,7 +190,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         if (player?.IsValid != true || player.IsBot)
             return HookResult.Continue;
 
-        // Đưa người chơi vào hàng đợi lưu dữ liệu
+        // Add player to save queue
         _saveQueue.Enqueue(player.SteamID);
 
         return HookResult.Continue;
@@ -218,7 +216,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         playerData.ShowFaceitLevel = !playerData.ShowFaceitLevel;
         var status = playerData.ShowFaceitLevel ? "enabled" : "disabled";
         var color = playerData.ShowFaceitLevel ? ChatColors.Green : ChatColors.Red;
-        
+
         player.PrintToChat($" {ChatColors.Gold}[FaceIT_Scoreboard] {ChatColors.Silver}>> FaceIT level display {color}{status}!");
 
         if (playerData.ShowFaceitLevel)
@@ -237,20 +235,20 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             ApplyPlayerCoin(player, 0);
         }
 
-        // Đưa người chơi vào hàng đợi lưu dữ liệu
+        // Add player to save queue
         _saveQueue.Enqueue(steamId);
     }
 
     private bool ShouldFetchLevel(PlayerData playerData)
     {
-        return !playerData.IsProcessing && 
-               (playerData.FaceitLevel == 0 || 
+        return !playerData.IsProcessing &&
+               (playerData.FaceitLevel == 0 ||
                 DateTime.Now - playerData.LastFetch > TimeSpan.FromHours(Config.CacheExpiryHours));
     }
 
     private async Task FetchPlayerFaceitLevelAsync(ulong steamId)
     {
-        if (!await _apiSemaphore.WaitAsync(100))
+        if (_apiSemaphore == null || !await _apiSemaphore.WaitAsync(100))
             return;
 
         try
@@ -283,14 +281,14 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
                 }
             }
 
-            // Đưa người chơi vào hàng đợi lưu dữ liệu
+            // Add player to save queue
             _saveQueue.Enqueue(steamId);
         }
         catch (Exception ex)
         {
             if (_playerData.TryGetValue(steamId, out var playerData))
                 playerData.IsProcessing = false;
-            
+
             Logger.LogError(ex, $"Error fetching FaceIT level for Steam ID {steamId}");
         }
         finally
@@ -303,10 +301,10 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     {
         try
         {
-            // Thử CS2 truớc
+            // Try CS2 first
             var level = await FetchFromFaceitApiAsync(steamId, "cs2");
 
-            // Nếu không có dữ liệu CS2, thử CSGO
+            // If no CS2 data, try CSGO
             if (level == 0 && Config.UseCSGO)
             {
                 level = await FetchFromFaceitApiAsync(steamId, "csgo");
@@ -328,7 +326,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             var url = $"https://open.faceit.com/data/v4/players?game={game}&game_player_id={steamId}";
 
             using var response = await _httpClient.GetAsync(url);
-            
+
             if (!response.IsSuccessStatusCode)
             {
                 if (response.StatusCode != System.Net.HttpStatusCode.NotFound)
@@ -341,9 +339,9 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
                 return 0;
 
             var player = JsonSerializer.Deserialize<FaceitPlayer>(jsonContent, JsonOptions);
-            
-            return player?.Games?.TryGetValue(game, out var gameData) == true 
-                ? gameData.SkillLevel 
+
+            return player?.Games?.TryGetValue(game, out var gameData) == true
+                ? gameData.SkillLevel
                 : 0;
         }
         catch (TaskCanceledException)
@@ -368,11 +366,11 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         try
         {
             var players = Utilities.GetPlayers();
-            var playersToUpdate = players.Where(p => 
-                p?.IsValid == true && 
-                !p.IsBot && 
+            var playersToUpdate = players.Where(p =>
+                p?.IsValid == true &&
+                !p.IsBot &&
                 _playerData.TryGetValue(p.SteamID, out var data) &&
-                data.ShowFaceitLevel && 
+                data.ShowFaceitLevel &&
                 data.FaceitLevel > 0).ToList();
 
             foreach (var player in playersToUpdate)
@@ -401,7 +399,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
                 return;
 
             var coinId = faceitLevel > 0 && FaceitLevelCoins.TryGetValue(faceitLevel, out var coin) ? coin : 0;
-            
+
             inventoryServices.Rank[5] = (MedalRank_t)coinId;
             Utilities.SetStateChanged(player, "CCSPlayerController", "m_pInventoryServices");
         }
@@ -460,7 +458,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
                 }
             }
 
-            // Cập nhật dữ liệu cho các người chơi trong danh sách
+            // Update data for players in the list
             foreach (var steamId in steamIds)
             {
                 if (_playerData.TryGetValue(steamId, out var playerData))
@@ -471,15 +469,15 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
                         FaceitLevel = playerData.FaceitLevel,
                         LastFetch = playerData.LastFetch,
                         FaceitId = playerData.FaceitId,
-                        IsProcessing = false // Không cần lưu trạng thái đang xử lý
+                        IsProcessing = false // No need to save processing state
                     };
                 }
             }
 
-            // Viết dữ liệu vào file
+            // Write data to file
             var json = JsonSerializer.Serialize(allData, JsonOptions);
             await File.WriteAllTextAsync(_dataPath, json);
-            
+
             Logger.LogDebug($"Saved data for {steamIds.Count} players");
         }
         catch (Exception ex)
@@ -512,7 +510,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             {
                 foreach (var (steamId, data) in allData)
                 {
-                    data.IsProcessing = false; // Đặt lại trạng thái đang xử lý
+                    data.IsProcessing = false; // Reset processing state
                     _playerData.TryAdd(steamId, data);
                 }
                 Logger.LogInformation($"Loaded {allData.Count} player records");

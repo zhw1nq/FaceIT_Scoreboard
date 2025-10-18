@@ -1,0 +1,51 @@
+# .github/dependabot.yml - Enhanced for CounterStrikeSharp monitoring
+version: 2
+updates:
+  # Monitor NuGet packages (includes CounterStrikeSharp)
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "daily"  # Check daily for CS# updates
+      time: "06:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "zhw1nq"  # Your GitHub username
+    assignees:
+      - "zhw1nq"
+    commit-message:
+      prefix: "feat"
+      prefix-development: "feat"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "counterstrikesharp"
+      - "auto-update"
+    # Specific rules for CounterStrikeSharp
+    allow:
+      - dependency-name: "CounterStrikeSharp*"
+        dependency-type: "direct"
+      - dependency-name: "Microsoft.Extensions.*"
+        dependency-type: "direct"
+    
+    # Custom update rules
+    groups:
+      counterstrikesharp:
+        patterns:
+          - "CounterStrikeSharp*"
+        update-types:
+          - "minor"
+          - "patch"
+      microsoft-extensions:
+        patterns:
+          - "Microsoft.Extensions.*"
+
+  # Monitor GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "ci"
+      - "github-actions"

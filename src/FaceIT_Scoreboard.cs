@@ -3,9 +3,7 @@ using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
-using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
-using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -24,19 +22,19 @@ public class FaceitConfig : BasePluginConfig
     public bool DefaultStatus { get; set; } = true;
 
     [JsonPropertyName("Commands")]
-    public List<string> Commands { get; set; } = new() { "!faceit", "!fl" };
+    public List<string> Commands { get; set; } = new() { "css_faceit", "css_fl" };
 
     [JsonPropertyName("CacheExpiryHours")]
     public int CacheExpiryHours { get; set; } = 24;
 
     [JsonPropertyName("MaxConcurrentRequests")]
-    public int MaxConcurrentRequests { get; set; } = 10;
+    public int MaxConcurrentRequests { get; set; } = 5;
 
     [JsonPropertyName("RequestTimeoutSeconds")]
     public int RequestTimeoutSeconds { get; set; } = 10;
 
     [JsonPropertyName("ConfigVersion")]
-    public override int Version { get; set; } = 2;
+    public override int Version { get; set; } = 3;
 }
 
 public class PlayerData
@@ -44,17 +42,13 @@ public class PlayerData
     public bool ShowFaceitLevel { get; set; }
     public int FaceitLevel { get; set; }
     public DateTime LastFetch { get; set; }
-    public string? FaceitId { get; set; }
     public bool IsProcessing { get; set; }
 }
 
 public class FaceitPlayer
 {
-    [JsonPropertyName("player_id")]
-    public string PlayerId { get; set; } = "";
-
     [JsonPropertyName("games")]
-    public Dictionary<string, GameData> Games { get; set; } = new();
+    public Dictionary<string, GameData>? Games { get; set; }
 }
 
 public class GameData
@@ -68,12 +62,12 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 {
     public override string ModuleName => "FaceIT_Scoreboard";
     public override string ModuleAuthor => "zhw1nq";
-    public override string ModuleDescription => "Displays FaceIT levels on the scoreboard – know who's carrying in a blink.";
-    public override string ModuleVersion => "1.0.1";
+    public override string ModuleDescription => "Displays FaceIT levels on the scoreboard";
+    public override string ModuleVersion => "1.1.0";
 
     public FaceitConfig Config { get; set; } = new();
 
-    private static readonly HttpClient _httpClient = new();
+    private HttpClient? _httpClient;
     private readonly ConcurrentDictionary<ulong, PlayerData> _playerData = new();
     private SemaphoreSlim? _apiSemaphore;
     private readonly SemaphoreSlim _fileSemaphore = new(1, 1);
@@ -90,16 +84,8 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    private CounterStrikeSharp.API.Modules.Timers.Timer? _updateTimer;
-    private CounterStrikeSharp.API.Modules.Timers.Timer? _saveTimer;
     private string _dataPath = "";
-    private readonly ConcurrentQueue<ulong> _saveQueue = new();
-
-    public FaceIT_Scoreboard()
-    {
-        // Initialize with default value, will be recreated in OnConfigParsed
-        _apiSemaphore = new SemaphoreSlim(10, 10);
-    }
+    private readonly HashSet<ulong> _dirtyPlayers = new();
 
     public void OnConfigParsed(FaceitConfig config)
     {
@@ -107,16 +93,17 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 
         if (string.IsNullOrEmpty(Config.FaceitApiKey))
         {
-            Logger.LogWarning("Faceit API key is not configured!");
+            Server.PrintToConsole("[FaceIT] Warning: API key is not configured!");
         }
 
-        // Configure HTTP client
-        _httpClient.DefaultRequestHeaders.Clear();
+        _httpClient?.Dispose();
+        _httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(Config.RequestTimeoutSeconds)
+        };
         _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {Config.FaceitApiKey}");
         _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-        _httpClient.Timeout = TimeSpan.FromSeconds(Config.RequestTimeoutSeconds);
 
-        // Recreate semaphore with the correct capacity
         _apiSemaphore?.Dispose();
         _apiSemaphore = new SemaphoreSlim(Config.MaxConcurrentRequests, Config.MaxConcurrentRequests);
 
@@ -127,31 +114,31 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     {
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
+        RegisterListener<Listeners.OnTick>(OnTick);
 
-        // Register commands efficiently
-        foreach (var command in Config.Commands)
+        if (Config.Commands.Count > 0)
         {
-            AddCommand(command, "Toggle Faceit level display", OnFaceitCommand);
+            foreach (var cmd in Config.Commands)
+            {
+                if (!string.IsNullOrWhiteSpace(cmd))
+                {
+                    AddCommand(cmd, "Toggle Faceit level display", OnFaceitCommand);
+                }
+            }
         }
 
-        // Setup optimal timers
-        _updateTimer = AddTimer(2.0f, UpdatePlayerCoins, TimerFlags.REPEAT);
-        _saveTimer = AddTimer(30.0f, ProcessSaveQueue, TimerFlags.REPEAT);
-
-        // Load player data from file (if exists)
         _ = LoadPlayerDataAsync();
+        AddTimer(60.0f, SaveDirtyPlayers, CounterStrikeSharp.API.Modules.Timers.TimerFlags.REPEAT);
 
-        Logger.LogInformation($"{ModuleName} v{ModuleVersion} loaded successfully!");
+        Server.PrintToConsole($"[FaceIT] v{ModuleVersion} loaded");
     }
 
     public override void Unload(bool hotReload)
     {
-        _updateTimer?.Kill();
-        _saveTimer?.Kill();
+        RemoveListener<Listeners.OnTick>(OnTick);
+        SaveDirtyPlayers();
 
-        // Save all pending data
-        ProcessSaveQueue();
-
+        _httpClient?.Dispose();
         _apiSemaphore?.Dispose();
         _fileSemaphore.Dispose();
     }
@@ -164,8 +151,6 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             return HookResult.Continue;
 
         var steamId = player.SteamID;
-
-        // Initialize or get player data
         var playerData = _playerData.GetOrAdd(steamId, _ => new PlayerData
         {
             ShowFaceitLevel = Config.DefaultStatus,
@@ -174,7 +159,6 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             IsProcessing = false
         });
 
-        // Fetch Faceit level data if needed (don't wait for result)
         if (ShouldFetchLevel(playerData))
         {
             _ = FetchPlayerFaceitLevelAsync(steamId);
@@ -187,18 +171,14 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     public HookResult OnPlayerDisconnect(EventPlayerDisconnect @event, GameEventInfo info)
     {
         var player = @event.Userid;
-        if (player?.IsValid != true || player.IsBot)
-            return HookResult.Continue;
-
-        // Add player to save queue
-        _saveQueue.Enqueue(player.SteamID);
+        if (player?.IsValid == true && !player.IsBot)
+        {
+            _dirtyPlayers.Add(player.SteamID);
+        }
 
         return HookResult.Continue;
     }
 
-    [ConsoleCommand("css_faceit")]
-    [ConsoleCommand("css_fl")]
-    [CommandHelper(minArgs: 0, usage: "", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnFaceitCommand(CCSPlayerController? player, CommandInfo commandInfo)
     {
         if (player?.IsValid != true || player.IsBot)
@@ -217,7 +197,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         var status = playerData.ShowFaceitLevel ? "enabled" : "disabled";
         var color = playerData.ShowFaceitLevel ? ChatColors.Green : ChatColors.Red;
 
-        player.PrintToChat($" {ChatColors.Gold}[FaceIT_Scoreboard] {ChatColors.Silver}>> FaceIT level display {color}{status}!");
+        player.PrintToChat($" {ChatColors.Gold}[FaceIT] {ChatColors.Silver}Level display {color}{status}");
 
         if (playerData.ShowFaceitLevel)
         {
@@ -225,18 +205,31 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             {
                 ApplyPlayerCoin(player, playerData.FaceitLevel);
             }
-            else if (!playerData.IsProcessing && ShouldFetchLevel(playerData))
+            else if (ShouldFetchLevel(playerData))
             {
                 _ = FetchPlayerFaceitLevelAsync(steamId);
             }
         }
         else
         {
-            ApplyPlayerCoin(player, 0);
+            RemovePlayerCoin(player);
         }
 
-        // Add player to save queue
-        _saveQueue.Enqueue(steamId);
+        _dirtyPlayers.Add(steamId);
+    }
+
+    private void OnTick()
+    {
+        foreach (var player in Utilities.GetPlayers())
+        {
+            if (player?.IsValid != true || player.IsBot || player.PlayerPawn?.Value == null)
+                continue;
+
+            if (_playerData.TryGetValue(player.SteamID, out var data) && data.ShowFaceitLevel && data.FaceitLevel > 0)
+            {
+                ApplyPlayerCoin(player, data.FaceitLevel);
+            }
+        }
     }
 
     private bool ShouldFetchLevel(PlayerData playerData)
@@ -266,30 +259,13 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 
             if (faceitLevel > 0)
             {
-                Logger.LogDebug($"Fetched FaceIT level {faceitLevel} for Steam ID {steamId}");
-
-                if (playerData.ShowFaceitLevel)
-                {
-                    Server.NextFrame(() =>
-                    {
-                        var player = Utilities.GetPlayerFromSteamId(steamId);
-                        if (player?.IsValid == true && !player.IsBot)
-                        {
-                            ApplyPlayerCoin(player, faceitLevel);
-                        }
-                    });
-                }
+                _dirtyPlayers.Add(steamId);
             }
-
-            // Add player to save queue
-            _saveQueue.Enqueue(steamId);
         }
-        catch (Exception ex)
+        catch
         {
             if (_playerData.TryGetValue(steamId, out var playerData))
                 playerData.IsProcessing = false;
-
-            Logger.LogError(ex, $"Error fetching FaceIT level for Steam ID {steamId}");
         }
         finally
         {
@@ -301,10 +277,8 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     {
         try
         {
-            // Try CS2 first
             var level = await FetchFromFaceitApiAsync(steamId, "cs2");
 
-            // If no CS2 data, try CSGO
             if (level == 0 && Config.UseCSGO)
             {
                 level = await FetchFromFaceitApiAsync(steamId, "csgo");
@@ -312,78 +286,36 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 
             return level;
         }
-        catch (Exception ex)
+        catch
         {
-            Logger.LogError(ex, $"Error calling FaceIT API for Steam ID {steamId}");
             return 0;
         }
     }
 
     private async Task<int> FetchFromFaceitApiAsync(ulong steamId, string game)
     {
+        if (_httpClient == null)
+            return 0;
+
         try
         {
             var url = $"https://open.faceit.com/data/v4/players?game={game}&game_player_id={steamId}";
-
             using var response = await _httpClient.GetAsync(url);
 
             if (!response.IsSuccessStatusCode)
-            {
-                if (response.StatusCode != System.Net.HttpStatusCode.NotFound)
-                    Logger.LogWarning($"FaceIT API returned {response.StatusCode} for Steam ID {steamId}");
-                return 0;
-            }
-
-            var jsonContent = await response.Content.ReadAsStringAsync();
-            if (string.IsNullOrEmpty(jsonContent))
                 return 0;
 
-            var player = JsonSerializer.Deserialize<FaceitPlayer>(jsonContent, JsonOptions);
+            var json = await response.Content.ReadAsStringAsync();
+            if (string.IsNullOrEmpty(json))
+                return 0;
 
-            return player?.Games?.TryGetValue(game, out var gameData) == true
-                ? gameData.SkillLevel
-                : 0;
-        }
-        catch (TaskCanceledException)
-        {
-            Logger.LogWarning($"Request timeout for Steam ID {steamId}");
-            return 0;
-        }
-        catch (JsonException ex)
-        {
-            Logger.LogError(ex, $"JSON parsing error for Steam ID {steamId}");
-            return 0;
-        }
-        catch (HttpRequestException ex)
-        {
-            Logger.LogError(ex, $"HTTP request error for Steam ID {steamId}");
-            return 0;
-        }
-    }
+            var player = JsonSerializer.Deserialize<FaceitPlayer>(json, JsonOptions);
 
-    private void UpdatePlayerCoins()
-    {
-        try
-        {
-            var players = Utilities.GetPlayers();
-            var playersToUpdate = players.Where(p =>
-                p?.IsValid == true &&
-                !p.IsBot &&
-                _playerData.TryGetValue(p.SteamID, out var data) &&
-                data.ShowFaceitLevel &&
-                data.FaceitLevel > 0).ToList();
-
-            foreach (var player in playersToUpdate)
-            {
-                if (_playerData.TryGetValue(player.SteamID, out var playerData))
-                {
-                    ApplyPlayerCoin(player, playerData.FaceitLevel);
-                }
-            }
+            return player?.Games?.TryGetValue(game, out var gameData) == true ? gameData.SkillLevel : 0;
         }
-        catch (Exception ex)
+        catch
         {
-            Logger.LogError(ex, "Error in UpdatePlayerCoins");
+            return 0;
         }
     }
 
@@ -391,38 +323,48 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     {
         try
         {
-            if (player?.IsValid != true || player.PlayerPawn?.Value == null)
-                return;
-
-            var inventoryServices = player.InventoryServices;
-            if (inventoryServices == null)
+            if (player?.IsValid != true || player.PlayerPawn?.Value == null || player.InventoryServices == null)
                 return;
 
             var coinId = faceitLevel > 0 && FaceitLevelCoins.TryGetValue(faceitLevel, out var coin) ? coin : 0;
 
-            inventoryServices.Rank[5] = (MedalRank_t)coinId;
+            // Xóa tất cả medals hiện tại trước khi đè
+            for (int i = 0; i < 6; i++)
+            {
+                player.InventoryServices.Rank[i] = (MedalRank_t)0;
+            }
+
+            // Đè FaceIT medal vào slot 5
+            player.InventoryServices.Rank[5] = (MedalRank_t)coinId;
             Utilities.SetStateChanged(player, "CCSPlayerController", "m_pInventoryServices");
         }
-        catch (Exception ex)
+        catch
         {
-            Logger.LogError(ex, $"Error setting coin for player {player?.PlayerName}");
         }
     }
 
-    private void ProcessSaveQueue()
+    private void RemovePlayerCoin(CCSPlayerController player)
     {
-        if (_saveQueue.IsEmpty)
-            return;
-
-        var steamIdsToSave = new HashSet<ulong>();
-        while (_saveQueue.TryDequeue(out var steamId))
+        try
         {
-            steamIdsToSave.Add(steamId);
+            if (player?.IsValid != true || player.PlayerPawn?.Value == null || player.InventoryServices == null)
+                return;
+
+            player.InventoryServices.Rank[5] = (MedalRank_t)0;
+            Utilities.SetStateChanged(player, "CCSPlayerController", "m_pInventoryServices");
         }
-
-        if (steamIdsToSave.Count > 0)
+        catch
         {
-            _ = SavePlayerDataBatchAsync(steamIdsToSave);
+        }
+    }
+
+    private void SaveDirtyPlayers()
+    {
+        if (_dirtyPlayers.Count > 0)
+        {
+            var toSave = new HashSet<ulong>(_dirtyPlayers);
+            _dirtyPlayers.Clear();
+            _ = SavePlayerDataBatchAsync(toSave);
         }
     }
 
@@ -435,13 +377,10 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         {
             var directory = Path.GetDirectoryName(_dataPath);
             if (!Directory.Exists(directory))
-            {
                 Directory.CreateDirectory(directory!);
-            }
 
             var allData = new Dictionary<ulong, PlayerData>();
 
-            // Load existing data
             if (File.Exists(_dataPath))
             {
                 try
@@ -452,13 +391,11 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
                         allData = JsonSerializer.Deserialize<Dictionary<ulong, PlayerData>>(existingJson, JsonOptions) ?? new();
                     }
                 }
-                catch (Exception ex)
+                catch
                 {
-                    Logger.LogError(ex, "Error reading existing player data");
                 }
             }
 
-            // Update data for players in the list
             foreach (var steamId in steamIds)
             {
                 if (_playerData.TryGetValue(steamId, out var playerData))
@@ -468,21 +405,16 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
                         ShowFaceitLevel = playerData.ShowFaceitLevel,
                         FaceitLevel = playerData.FaceitLevel,
                         LastFetch = playerData.LastFetch,
-                        FaceitId = playerData.FaceitId,
-                        IsProcessing = false // No need to save processing state
+                        IsProcessing = false
                     };
                 }
             }
 
-            // Write data to file
             var json = JsonSerializer.Serialize(allData, JsonOptions);
             await File.WriteAllTextAsync(_dataPath, json);
-
-            Logger.LogDebug($"Saved data for {steamIds.Count} players");
         }
-        catch (Exception ex)
+        catch
         {
-            Logger.LogError(ex, "Error saving player data batch");
         }
         finally
         {
@@ -495,10 +427,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         try
         {
             if (!File.Exists(_dataPath))
-            {
-                Logger.LogInformation("No existing player data found");
                 return;
-            }
 
             var json = await File.ReadAllTextAsync(_dataPath);
             if (string.IsNullOrEmpty(json))
@@ -510,15 +439,13 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             {
                 foreach (var (steamId, data) in allData)
                 {
-                    data.IsProcessing = false; // Reset processing state
+                    data.IsProcessing = false;
                     _playerData.TryAdd(steamId, data);
                 }
-                Logger.LogInformation($"Loaded {allData.Count} player records");
             }
         }
-        catch (Exception ex)
+        catch
         {
-            Logger.LogError(ex, "Error loading player data");
         }
     }
 }

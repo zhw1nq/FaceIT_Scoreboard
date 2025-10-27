@@ -241,7 +241,7 @@ jobs:
         path: ${{ env.OUTPUT_PATH }}
 
     - name: Upload Build Artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: ${{ env.PROJECT_NAME }}-${{ needs.calculate-version.outputs.version }}
         path: ${{ env.PROJECT_NAME }}-${{ needs.calculate-version.outputs.version }}.zip

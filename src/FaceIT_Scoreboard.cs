@@ -28,10 +28,10 @@ public class FaceitConfig : BasePluginConfig
     public int CacheExpiryHours { get; set; } = 24;
 
     [JsonPropertyName("MaxConcurrentRequests")]
-    public int MaxConcurrentRequests { get; set; } = 5;
+    public int MaxConcurrentRequests { get; set; } = 3;
 
     [JsonPropertyName("RequestTimeoutSeconds")]
-    public int RequestTimeoutSeconds { get; set; } = 10;
+    public int RequestTimeoutSeconds { get; set; } = 8;
 
     [JsonPropertyName("ConfigVersion")]
     public override int Version { get; set; } = 3;
@@ -42,7 +42,6 @@ public class PlayerData
     public bool ShowFaceitLevel { get; set; }
     public int FaceitLevel { get; set; }
     public DateTime LastFetch { get; set; }
-    public bool IsProcessing { get; set; }
 }
 
 public class FaceitPlayer
@@ -63,7 +62,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     public override string ModuleName => "FaceIT_Scoreboard";
     public override string ModuleAuthor => "zhw1nq";
     public override string ModuleDescription => "Displays FaceIT levels on the scoreboard";
-    public override string ModuleVersion => "1.1.0";
+    public override string ModuleVersion => "1.1.1";
 
     public FaceitConfig Config { get; set; } = new();
 
@@ -71,6 +70,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     private readonly ConcurrentDictionary<ulong, PlayerData> _playerData = new();
     private SemaphoreSlim? _apiSemaphore;
     private readonly SemaphoreSlim _fileSemaphore = new(1, 1);
+    private readonly ConcurrentDictionary<ulong, bool> _processingPlayers = new();
 
     private static readonly Dictionary<int, int> FaceitLevelCoins = new()
     {
@@ -85,7 +85,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     };
 
     private string _dataPath = "";
-    private readonly HashSet<ulong> _dirtyPlayers = new();
+    private readonly ConcurrentBag<ulong> _dirtyPlayers = new();
 
     public void OnConfigParsed(FaceitConfig config)
     {
@@ -97,7 +97,12 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         }
 
         _httpClient?.Dispose();
-        _httpClient = new HttpClient
+        _httpClient = new HttpClient(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+            MaxConnectionsPerServer = Config.MaxConcurrentRequests
+        })
         {
             Timeout = TimeSpan.FromSeconds(Config.RequestTimeoutSeconds)
         };
@@ -128,7 +133,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         }
 
         _ = LoadPlayerDataAsync();
-        AddTimer(60.0f, SaveDirtyPlayers, CounterStrikeSharp.API.Modules.Timers.TimerFlags.REPEAT);
+        AddTimer(120.0f, SaveDirtyPlayers, CounterStrikeSharp.API.Modules.Timers.TimerFlags.REPEAT);
 
         Server.PrintToConsole($"[FaceIT] v{ModuleVersion} loaded");
     }
@@ -155,8 +160,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         {
             ShowFaceitLevel = Config.DefaultStatus,
             FaceitLevel = 0,
-            LastFetch = DateTime.MinValue,
-            IsProcessing = false
+            LastFetch = DateTime.MinValue
         });
 
         if (ShouldFetchLevel(playerData))
@@ -174,6 +178,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         if (player?.IsValid == true && !player.IsBot)
         {
             _dirtyPlayers.Add(player.SteamID);
+            _processingPlayers.TryRemove(player.SteamID, out _);
         }
 
         return HookResult.Continue;
@@ -189,8 +194,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         {
             ShowFaceitLevel = Config.DefaultStatus,
             FaceitLevel = 0,
-            LastFetch = DateTime.MinValue,
-            IsProcessing = false
+            LastFetch = DateTime.MinValue
         });
 
         playerData.ShowFaceitLevel = !playerData.ShowFaceitLevel;
@@ -234,28 +238,30 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 
     private bool ShouldFetchLevel(PlayerData playerData)
     {
-        return !playerData.IsProcessing &&
-               (playerData.FaceitLevel == 0 ||
-                DateTime.Now - playerData.LastFetch > TimeSpan.FromHours(Config.CacheExpiryHours));
+        return playerData.FaceitLevel == 0 ||
+               DateTime.Now - playerData.LastFetch > TimeSpan.FromHours(Config.CacheExpiryHours);
     }
 
     private async Task FetchPlayerFaceitLevelAsync(ulong steamId)
     {
-        if (_apiSemaphore == null || !await _apiSemaphore.WaitAsync(100))
+        if (!_processingPlayers.TryAdd(steamId, true))
             return;
+
+        if (_apiSemaphore == null || !await _apiSemaphore.WaitAsync(50))
+        {
+            _processingPlayers.TryRemove(steamId, out _);
+            return;
+        }
 
         try
         {
-            if (!_playerData.TryGetValue(steamId, out var playerData) || playerData.IsProcessing)
+            if (!_playerData.TryGetValue(steamId, out var playerData))
                 return;
-
-            playerData.IsProcessing = true;
 
             var faceitLevel = await GetFaceitLevelFromApiAsync(steamId);
 
             playerData.FaceitLevel = faceitLevel;
             playerData.LastFetch = DateTime.Now;
-            playerData.IsProcessing = false;
 
             if (faceitLevel > 0)
             {
@@ -264,12 +270,11 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
         }
         catch
         {
-            if (_playerData.TryGetValue(steamId, out var playerData))
-                playerData.IsProcessing = false;
         }
         finally
         {
             _apiSemaphore.Release();
+            _processingPlayers.TryRemove(steamId, out _);
         }
     }
 
@@ -328,13 +333,11 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 
             var coinId = faceitLevel > 0 && FaceitLevelCoins.TryGetValue(faceitLevel, out var coin) ? coin : 0;
 
-            // Xóa tất cả medals hiện tại trước khi đè
             for (int i = 0; i < 6; i++)
             {
                 player.InventoryServices.Rank[i] = (MedalRank_t)0;
             }
 
-            // Đè FaceIT medal vào slot 5
             player.InventoryServices.Rank[5] = (MedalRank_t)coinId;
             Utilities.SetStateChanged(player, "CCSPlayerController", "m_pInventoryServices");
         }
@@ -360,17 +363,24 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
 
     private void SaveDirtyPlayers()
     {
-        if (_dirtyPlayers.Count > 0)
+        if (_dirtyPlayers.IsEmpty)
+            return;
+
+        var toSave = new HashSet<ulong>();
+        while (_dirtyPlayers.TryTake(out var steamId))
         {
-            var toSave = new HashSet<ulong>(_dirtyPlayers);
-            _dirtyPlayers.Clear();
+            toSave.Add(steamId);
+        }
+
+        if (toSave.Count > 0)
+        {
             _ = SavePlayerDataBatchAsync(toSave);
         }
     }
 
     private async Task SavePlayerDataBatchAsync(HashSet<ulong> steamIds)
     {
-        if (!await _fileSemaphore.WaitAsync(5000))
+        if (!await _fileSemaphore.WaitAsync(3000))
             return;
 
         try
@@ -404,8 +414,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
                     {
                         ShowFaceitLevel = playerData.ShowFaceitLevel,
                         FaceitLevel = playerData.FaceitLevel,
-                        LastFetch = playerData.LastFetch,
-                        IsProcessing = false
+                        LastFetch = playerData.LastFetch
                     };
                 }
             }
@@ -439,7 +448,6 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
             {
                 foreach (var (steamId, data) in allData)
                 {
-                    data.IsProcessing = false;
                     _playerData.TryAdd(steamId, data);
                 }
             }

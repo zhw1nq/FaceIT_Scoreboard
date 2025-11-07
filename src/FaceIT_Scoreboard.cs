@@ -62,7 +62,7 @@ public partial class FaceIT_Scoreboard : BasePlugin, IPluginConfig<FaceitConfig>
     public override string ModuleName => "FaceIT_Scoreboard";
     public override string ModuleAuthor => "zhw1nq";
     public override string ModuleDescription => "Displays FaceIT levels on the scoreboard";
-    public override string ModuleVersion => "1.1.1";
+    public override string ModuleVersion => ".2.0";
 
     public FaceitConfig Config { get; set; } = new();
 
